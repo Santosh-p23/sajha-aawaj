@@ -115,7 +115,8 @@ export const addSpeaker = (data) => (dispatch, getState) => {
 export const addSpeech = (data) => (dispatch, getState) => {
 
     let form_data = new FormData();
-    form_data.append('audiofile', data.audio);
+    console.log(data.audio);
+    form_data.append('audiofile', data.audio, 'recording.wav');
     form_data.append('speaker', data.speaker);
 
     axios

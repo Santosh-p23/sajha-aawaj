@@ -1,5 +1,7 @@
-
-from rest_framework import viewsets, permissions
+from encodings import utf_8
+from http import HTTPStatus
+from wsgiref.util import FileWrapper
+from rest_framework import viewsets, permissions, generics
 from rest_framework.response import Response
 from rest_framework import status
 from .models import NepaliTextCollection, Speech, Speaker, NepaliText, Snippet, SpeechToText
@@ -9,13 +11,28 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from django.contrib.auth.models import User
 
 from rest_framework.pagination import PageNumberPagination
-
+from django.conf import settings
+from django.http import HttpResponse
 
 import torchaudio
 import  librosa
 import torch
+import shutil
 
 from .apps import VoicelinesConfig
+
+import unicodecsv as csv
+
+from django.http import StreamingHttpResponse
+
+from models2.infer import speechToText
+
+
+
+
+class Echo:
+    def write(self, value):
+        return value
 
 
 
@@ -89,7 +106,11 @@ class SnippetListenViewSet(viewsets.ModelViewSet):
             
         elif(snippet.verification_count >=2):
             snippet.is_verified = True
+            
+            newpath = shutil.copy(snippet.speech.audiofile.path, VoicelinesConfig.verifiedVoicelinePath)            
+            # print('newpath', newpath)
             snippet.save()
+            
 
         return Response({'status':'Snippet updated'})
        
@@ -111,14 +132,44 @@ class SnippetRecordViewSet(viewsets.ModelViewSet):
             
             
             
-class SnippetVerifiedViewSet(viewsets.ModelViewSet):
-    queryset = Snippet.objects.filter(is_recorded=True).filter(is_verified = True)
-    permission_classes = [permissions.AllowAny]
+# class SnippetVerifiedViewSet(viewsets.ModelViewSet):
+#     queryset = Snippet.objects.filter(is_recorded=True).filter(is_verified = True)
+#     permission_classes = [permissions.AllowAny]
     
-    serializer_class = SnippetSerializer
+#     serializer_class = SnippetSerializer
     
     
+class SnippetVerifiedViewSet(generics.GenericAPIView):
     
+    def get(self,request):
+        queryset = Snippet.objects.filter(is_recorded=True).filter(is_verified = True)
+        
+        dataset =[]
+        for snip in queryset:
+            dataset.append([snip.text.text, snip.speech.audiofile.name])
+            
+        print(dataset)
+        echo_buffer = Echo()
+        csv_writer = csv.writer(echo_buffer)
+        
+        fields = ['text', 'audiofile']
+        with open(VoicelinesConfig.verifiedVoicelinePath+'/data.csv','wb') as f:
+            write = csv.writer(f)
+            write.writerow(fields)
+            write.writerows(dataset)
+        
+        shutil.make_archive(VoicelinesConfig.verifiedVoicelinePath,'zip',VoicelinesConfig.verifiedVoicelinePath)
+        rows = (csv_writer.writerow(row) for row in dataset)
+        # response = StreamingHttpResponse(rows, content_type="text/csv")
+        # response["Content-Disposition"] = 'attachment; filename="speech_dataset.csv"'
+        
+        zipname = VoicelinesConfig.mediapath+'verifiedVoicelines.zip'
+        wrapper = FileWrapper(open(zipname, 'rb'))
+        response = HttpResponse(wrapper, content_type='application/zip')
+        response['Content-Disposition'] = 'attachment; filename="speech_dataset.zip"'
+        return response
+        
+         
 class SpeechToTextViewSet(viewsets.ModelViewSet):
     queryset = Speech.objects.all()
     permission_classes = [permissions.AllowAny]
@@ -128,7 +179,7 @@ class SpeechToTextViewSet(viewsets.ModelViewSet):
     
 class NepaliTextCollectionViewSet(viewsets.ModelViewSet):
     queryset = NepaliTextCollection.objects.all()
-    permission_classes =[permissions.AllowAny]
+    permission_classes =[permissions.IsAuthenticated]
     
     serializer_class = NepaliTextCollectionSerializer
     
@@ -136,6 +187,18 @@ class NepaliTextCollectionViewSet(viewsets.ModelViewSet):
     def perform_create(self,serializer):
         text_file = serializer.save()
         # read the file and create text objects for the lines
+        print(text_file.text_file.path)
+        
+        with open(text_file.text_file.path, encoding ='utf8' ) as f:
+            lines = f.readlines()
+            print(lines[0].strip())
+            
+            # for line in f:
+            #     print(line.strip())
+
+        for line in lines:
+            text = NepaliText.objects.create(text = line.strip())
+            Snippet.objects.create(text = text)
         
         
 class SpeechToTextViewSet(viewsets.ModelViewSet):
@@ -174,3 +237,20 @@ class SpeechToTextViewSet(viewsets.ModelViewSet):
         snippet.save()
                 
       
+      
+class SpeechToTextViewSet2(viewsets.ModelViewSet):
+    queryset = SpeechToText.objects.all()
+    permission_classes = [ permissions.AllowAny]
+    parser_classes = (FormParser, MultiPartParser,)
+    
+    serializer_class = SpeechToTextSerializer
+    
+    
+    def perform_create(self, serializer):
+        snippet = serializer.save()
+        hyp  =speechToText(snippet.audiofile.path)
+        print(hyp)
+        snippet.text = hyp
+        snippet.save()
+        
+        

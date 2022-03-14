@@ -1,5 +1,7 @@
 node_modules
 env
+models
+models2
 
 ### Django ###
 *.log

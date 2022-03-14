@@ -52,3 +52,4 @@ class SpeechToTextSerializer(serializers.ModelSerializer):
     class Meta:
         model = SpeechToText
         fields = '__all__'
+        
